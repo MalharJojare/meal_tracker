@@ -44,5 +44,5 @@ streamlit run meal_tracker.py
 
 ## 🧑 Author
 **Malhar Jojare**  
-🔗 [LinkedIn](https://linkedin.com/malharjojare) | [GitHub](https://github.com/MalharJojare)
+🔗 [LinkedIn](https://www.linkedin.com/in/malharjojare/) | [GitHub](https://github.com/MalharJojare)
 

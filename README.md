@@ -16,13 +16,14 @@ Built with **Python + Streamlit + SQLite**, designed for **single-user login** a
 ---
 
 ## 📂 Project Structure
+```text
 MealTracker/
 │
-├── meal_tracker.py # Main Streamlit app
-├── meals.db # SQLite database (auto-created on first run)
-├── requirements.txt # Dependencies
-└── README.md # Project documentation
-
+├── meal_tracker.py      # Main Streamlit app
+├── meals.db             # SQLite database (auto-created on first run)
+├── requirements.txt     # Dependencies
+└── README.md            # Project documentation
+```
 ## 🚀 Getting Started
 
 ### 1. Clone repo

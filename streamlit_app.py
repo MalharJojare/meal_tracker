@@ -23,6 +23,11 @@ c.execute('''CREATE TABLE IF NOT EXISTS meals (
                 calories REAL,
                 protein REAL
             )''')
+c.execute('''CREATE TABLE IF NOT EXISTS goals (
+                username TEXT PRIMARY KEY,
+                calories REAL,
+                protein REAL
+            )''')
 conn.commit()
 
 # ---------- Auth ----------
@@ -40,9 +45,14 @@ def add_user(username, password):
         conn.commit()
     except sqlite3.IntegrityError:
         pass
+def set_goal(username, calories, protein):
+    c.execute("INSERT OR REPLACE INTO goals VALUES (?, ?, ?)", (username, calories, protein))
+    conn.commit()
 
-# Create your account (one-time setup)
-# add_user("msjojare", "GokuMtu@12345")  # change password here
+def get_goal(username):
+    c.execute("SELECT calories, protein FROM goals WHERE username=?", (username,))
+    return c.fetchone()
+
 
 # ---------- UI ----------
 st.title("🍽️ Meal Tracker Dashboard")
@@ -61,9 +71,9 @@ if not st.session_state.logged_in:
         if check_login(username, password):
             st.session_state.logged_in = True
             st.session_state.username = username
-            st.success("Login successful!")
-        else:
-            st.error("Invalid credentials")
+            if st.checkbox("Remember Me"):
+                st.session_state.remember_me = True
+
 else:
     st.sidebar.success(f"Logged in as {st.session_state.username}")
     menu = st.sidebar.radio("Menu", ["Add Meal", "View History", "Daily Summary", "Logout"])
@@ -87,11 +97,18 @@ else:
 
             # Decide which item to use
             item = new_item if new_item.strip() != "" else item_choice
+            c.execute("SELECT serving_size, (calories/weight)*serving_size, (protein/weight)*serving_size FROM meals WHERE username=? AND item=? LIMIT 1",
+                    (st.session_state.username, item_choice))
+            prev_info = c.fetchone()
 
+            if prev_info:
+                serving_size_default, cal_serving_default, pro_serving_default = prev_info
+            else:
+                serving_size_default = cal_serving_default = pro_serving_default = 0
             weight = st.number_input("Weight (g)", min_value=0.0, step=1.0)
-            serving_size = st.number_input("Serving Size (g)", min_value=1.0, step=1.0)
-            calories_per_serving = st.number_input("Calories per Serving", min_value=0.0, step=1.0)
-            protein_per_serving = st.number_input("Protein per Serving (g)", min_value=0.0, step=0.1)
+            serving_size = st.number_input("Serving Size (g)", min_value=1.0, step=1.0, value=serving_size_default)
+            calories_per_serving = st.number_input("Calories per Serving", min_value=0.0, step=1.0, value=cal_serving_default)
+            protein_per_serving = st.number_input("Protein per Serving (g)", min_value=0.0, step=0.1, value=pro_serving_default)
 
             # Auto adjustment
             calories = (weight / serving_size) * calories_per_serving if serving_size > 0 else 0
@@ -115,30 +132,50 @@ else:
 
     # ---------- History ----------
     elif menu == "View History":
-        st.subheader("Meal History")
-        c.execute("SELECT date, item, weight, calories, protein FROM meals WHERE username=? ORDER BY date DESC",
-                  (st.session_state.username,))
-        rows = c.fetchall()
-        df = pd.DataFrame(rows, columns=["Date", "Item", "Weight (g)", "Calories", "Protein (g)"])
-        st.dataframe(df)
+        df["Date"] = pd.to_datetime(df["Date"])
+        period = st.selectbox("Group By", ["Day", "Week", "Month"])
+
+        if period == "Day":
+            grouped = df.groupby(df["Date"].dt.date).sum()
+        elif period == "Week":
+            grouped = df.groupby(df["Date"].dt.isocalendar().week).sum()
+        else:
+            grouped = df.groupby(df["Date"].dt.to_period("M")).sum()
+
+        st.dataframe(grouped)
+
+        # Show goals if available
+        goal = get_goal(st.session_state.username)
+        if goal:
+            g_cal, g_pro = goal
+            st.write(f"**Target:** {g_cal} calories, {g_pro} g protein")
 
     # ---------- Daily Summary ----------
     elif menu == "Daily Summary":
         st.subheader("Daily Summary")
+
+        # Get user’s goal
+        goal = get_goal(st.session_state.username)
+        if goal:
+            g_cal, g_pro = goal
+            st.metric("Target Calories", f"{g_cal:.2f}")
+            st.metric("Target Protein", f"{g_pro:.2f} g")
+        else:
+            st.info("No goals set yet.")
+
+        # Allow setting/updating goals
+        with st.form("set_goal"):
+            goal_cal = st.number_input("Set Target Calories", min_value=0.0, step=10.0)
+            goal_pro = st.number_input("Set Target Protein (g)", min_value=0.0, step=1.0)
+            if st.form_submit_button("Save Goal"):
+                set_goal(st.session_state.username, goal_cal, goal_pro)
+                st.success("Goals saved!")
+
+        # Existing daily totals
         today = datetime.today().strftime("%Y-%m-%d")
         c.execute("SELECT SUM(calories), SUM(protein) FROM meals WHERE username=? AND date=?",
-                  (st.session_state.username, today))
+                (st.session_state.username, today))
         result = c.fetchone()
         total_cal, total_pro = result if result else (0, 0)
         st.metric("Total Calories", f"{total_cal:.2f}")
         st.metric("Total Protein", f"{total_pro:.2f} g")
-
-        # Breakdown
-        c.execute("SELECT item, calories, protein FROM meals WHERE username=? AND date=?",
-                  (st.session_state.username, today))
-        rows = c.fetchall()
-        if rows:
-            df = pd.DataFrame(rows, columns=["Item", "Calories", "Protein (g)"])
-            st.table(df)
-        else:
-            st.info("No meals logged today.")

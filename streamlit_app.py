@@ -1,22 +1,17 @@
-import os, shutil
+import os
 from pathlib import Path
+import shutil
 
-# --- Robust cloud detection & setup ---
-def _on_cloud() -> bool:
-    # /mount/data should exist on Streamlit Cloud; also try to create it just in case
-    try:
-        os.makedirs("/mount/data", exist_ok=True)
-    except Exception:
-        pass
+def on_cloud() -> bool:
+    # Only *detect*, never create. /mount/data exists on Streamlit Cloud images.
     return os.path.isdir("/mount/data")
 
-IS_CLOUD = _on_cloud()
+IS_CLOUD = on_cloud()
 DATA_DIR = Path("/mount/data") if IS_CLOUD else Path(".")
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 DB_PATH = DATA_DIR / "meals.db"
 REMEMBER_PATH = DATA_DIR / "remember.json"
-
 # Optional: seed DB on first run (commit a copy at seed/meals.db if you want)
 SEED_DB = Path("seed/meals.db")
 if not DB_PATH.exists() and SEED_DB.exists():

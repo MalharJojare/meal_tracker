@@ -1,12 +1,30 @@
+import shutil
+from pathlib import Path
+
+# Use Streamlit Cloud's persistent storage if available
+IS_CLOUD = Path("/mount/data").exists()
+DATA_DIR = Path("/mount/data") if IS_CLOUD else Path(".")
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+DB_PATH = DATA_DIR / "meals.db"
+REMEMBER_PATH = DATA_DIR / "remember.json"
+SEED_DB = Path("meals.db")  # assumes you committed meals.db once for seeding
+if not DB_PATH.exists() and SEED_DB.exists():
+    shutil.copy(SEED_DB, DB_PATH)
 import streamlit as st
 import sqlite3
 import hashlib
 from datetime import datetime
 import pandas as pd
 import json, os
+from zoneinfo import ZoneInfo
+from datetime import date as _date
 # ---------- DB Setup ----------
-conn = sqlite3.connect("meals.db", check_same_thread=False)
+
+conn = sqlite3.connect(str(DB_PATH), check_same_thread=False)
 c = conn.cursor()
+c.execute("PRAGMA journal_mode=WAL;")  # better for concurrent reads
+
 
 c.execute('''CREATE TABLE IF NOT EXISTS users (
                 username TEXT PRIMARY KEY,
@@ -43,7 +61,8 @@ except sqlite3.OperationalError:
 conn.commit()
 
 # ---------- Auth ----------
-CRED_FILE = "remember.json"
+CRED_FILE = str(REMEMBER_PATH)
+LOCAL_TZ = ZoneInfo("America/Chicago")  # set once at top of file
 
 def save_remember(username):
     with open(CRED_FILE, "w") as f:
@@ -113,6 +132,10 @@ st.title("🍽️ Meal Tracker Dashboard")
 # Login
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
+with st.expander("🔎 Debug Storage Info"):
+    st.write("Cloud environment:", IS_CLOUD)
+    st.write("DB path in use:", DB_PATH)
+    st.write("Remember path:", REMEMBER_PATH)
 
 if not st.session_state.get("logged_in", False):
     with st.form("login"):
@@ -164,6 +187,11 @@ else:
         # 3) The actual form (weights etc.)
         # Use keys that depend on the selected item → resets values when item changes
         with st.form("add_meal"):
+            entry_date = st.date_input(
+                "Date",
+                value=datetime.now(LOCAL_TZ).date(),  # default to local today
+                key=f"add_date_{effective_item or 'none'}"
+            )
             weight = st.number_input(
                 "Weight (g)", min_value=0.0, step=1.0,
                 key=f"add_weight_{effective_item or 'none'}"
@@ -198,8 +226,12 @@ else:
             else:
                 # Decide which item name to use
                 item = new_item.strip() if new_item.strip() != "" else item_choice.strip()
-                c.execute('''INSERT INTO meals (username, date, item, weight, serving_size, calories, protein, meal_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
-                          (st.session_state.username, datetime.today().strftime("%Y-%m-%d"), item, weight, serving_size, calories, protein, meal_type))
+                c.execute('''INSERT INTO meals (username, date, item, weight, serving_size, calories, protein, meal_type)                VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
+                (
+                    st.session_state.username,
+                    entry_date.isoformat(),        # ✅ store the chosen date
+                    item, weight, serving_size, calories, protein, meal_type
+                ))
                 conn.commit()
                 st.success(f"Meal '{effective_item}' added!")
                 st.rerun()
@@ -246,6 +278,9 @@ else:
                         # render form only if this row is being edited
                         if st.session_state.get("editing_id") == row["ID"]:
                             with st.form(f"edit_form_{row['ID']}"):
+                                current_date = datetime.strptime(row["Date"], "%Y-%m-%d").date()
+                                new_date = st.date_input("Date", value=current_date, key=f"date_{row['ID']}")
+
                                 new_weight = st.number_input("New Weight (g)", value=row["Weight (g)"], step=1.0, key=f"weight_{row['ID']}")
                                 new_serving = st.number_input("New Serving Size (g)", value=row["Serving Size"], step=1.0, key=f"serving_{row['ID']}")
                                 new_protein = st.number_input("New Protein (g)", value=row["Protein (g)"], step=0.1, key=f"protein_{row['ID']}")
@@ -259,8 +294,8 @@ else:
 
                             if save_btn:
                                 c.execute(
-                                    "UPDATE meals SET weight=?, serving_size=?, protein=?, meal_type=? WHERE id=? AND username=?",
-                                    (new_weight, new_serving, new_protein, new_meal_type, row["ID"], st.session_state.username)
+                                    "UPDATE meals SET date=?, weight=?, serving_size=?, protein=?, meal_type=? WHERE id=? AND username=?",
+                                    (new_date.isoformat(), new_weight, new_serving, new_protein, new_meal_type, row["ID"], st.session_state.username)
                                 )
                                 conn.commit()
                                 st.success("Meal updated!")

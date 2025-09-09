@@ -55,12 +55,13 @@ c.execute('''CREATE TABLE IF NOT EXISTS goals (
 try:
     # Normalize rows where meal_type is NULL or empty
     c.execute("UPDATE meals SET meal_type='Other' WHERE meal_type IS NULL OR TRIM(meal_type)=''")
-    
+    conn.commit()
 except sqlite3.OperationalError:
     # This can happen if the column is missing in old DB schema
     pass
 try:
     c.execute("ALTER TABLE meals ADD COLUMN meal_type TEXT DEFAULT 'Other'")
+    conn.commit()
 except sqlite3.OperationalError:
     # This happens if the column already exists
     pass

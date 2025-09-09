@@ -3,20 +3,23 @@ from pathlib import Path
 import shutil
 
 def on_cloud() -> bool:
-    # Explicit override (best for Streamlit Cloud)
+    # Explicit override (via Streamlit Secrets)
     if os.environ.get("FORCE_CLOUD", "") == "1":
         return True
-    # Default: detect the well-known persistent mount
+    # Default detection
     return os.path.isdir("/mount/data")
 
 IS_CLOUD = on_cloud()
 DATA_DIR = Path("/mount/data") if IS_CLOUD else Path(".")
-DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+# ✅ Only mkdir for local, never for cloud
+if not IS_CLOUD:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 DB_PATH = DATA_DIR / "meals.db"
 REMEMBER_PATH = DATA_DIR / "remember.json"
 
-# Optional: seed DB on first run (commit seed/meals.db if you want initial data)
+# Optional: seed DB if missing
 SEED_DB = Path("seed/meals.db")
 if not DB_PATH.exists() and SEED_DB.exists():
     shutil.copy(SEED_DB, DB_PATH)

@@ -3,26 +3,29 @@ from pathlib import Path
 import shutil
 
 def on_cloud() -> bool:
-    # Explicit override (via Streamlit Secrets)
+    # Allow override via Secrets: FORCE_CLOUD = "1"
     if os.environ.get("FORCE_CLOUD", "") == "1":
         return True
-    # Default detection
     return os.path.isdir("/mount/data")
 
 IS_CLOUD = on_cloud()
 DATA_DIR = Path("/mount/data") if IS_CLOUD else Path(".")
-
-# ✅ Only mkdir for local, never for cloud
+# Only create locally; /mount/data exists on Cloud and shouldn't be mkdir'ed by the app
 if not IS_CLOUD:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 DB_PATH = DATA_DIR / "meals.db"
 REMEMBER_PATH = DATA_DIR / "remember.json"
 
-# Optional: seed DB if missing
+# --- Safe, optional seed (won't crash if missing or unwritable) ---
 SEED_DB = Path("seed/meals.db")
-if not DB_PATH.exists() and SEED_DB.exists():
-    shutil.copy(SEED_DB, DB_PATH)
+if IS_CLOUD and (not DB_PATH.exists()) and SEED_DB.exists():
+    try:
+        # Parent should already exist on Cloud; if not, don't crash
+        shutil.copy(str(SEED_DB), str(DB_PATH))
+    except Exception as e:
+        # Just continue: SQLite will create the DB on connect
+        pass
 
 import streamlit as st
 import sqlite3

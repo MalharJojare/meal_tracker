@@ -1,16 +1,27 @@
-import shutil
+import os, shutil
 from pathlib import Path
 
-# Use Streamlit Cloud's persistent storage if available
-IS_CLOUD = Path("/mount/data").exists()
+# --- Robust cloud detection & setup ---
+def _on_cloud() -> bool:
+    # /mount/data should exist on Streamlit Cloud; also try to create it just in case
+    try:
+        os.makedirs("/mount/data", exist_ok=True)
+    except Exception:
+        pass
+    return os.path.isdir("/mount/data")
+
+IS_CLOUD = _on_cloud()
 DATA_DIR = Path("/mount/data") if IS_CLOUD else Path(".")
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 DB_PATH = DATA_DIR / "meals.db"
 REMEMBER_PATH = DATA_DIR / "remember.json"
-SEED_DB = Path("meals.db")  # assumes you committed meals.db once for seeding
+
+# Optional: seed DB on first run (commit a copy at seed/meals.db if you want)
+SEED_DB = Path("seed/meals.db")
 if not DB_PATH.exists() and SEED_DB.exists():
     shutil.copy(SEED_DB, DB_PATH)
+
 import streamlit as st
 import sqlite3
 import hashlib
@@ -126,6 +137,19 @@ remembered_user = load_remember()
 if remembered_user and not st.session_state.get("logged_in", False):
     st.session_state.logged_in = True
     st.session_state.username = remembered_user
+
+def user_count():
+    c.execute("SELECT COUNT(*) FROM users")
+    return c.fetchone()[0] or 0
+
+if user_count() == 0:
+    # Prefer pulling these from secrets or env for safety:
+    # admin_user = st.secrets.get("ADMIN_USER", "msjojare")
+    # admin_pass = st.secrets.get("ADMIN_PASS", "CHANGE_ME")
+    admin_user = "msjojare"
+    admin_pass = "GokuMtu@12345"  # change later!
+    add_user(admin_user, admin_pass)
+    st.info(f"First-time setup: created user **{admin_user}**. Log in, then change the password.")
 # ---------- UI ----------
 st.title("🍽️ Meal Tracker Dashboard")
 
@@ -138,6 +162,20 @@ with st.expander("🔎 Debug Storage Info"):
     st.write("Remember path:", REMEMBER_PATH)
 
 if not st.session_state.get("logged_in", False):
+     # If no users yet, show a small setup form
+    if user_count() == 0:
+        st.warning("No users exist yet. Create the first account:")
+        with st.form("first_user"):
+            nu = st.text_input("New username")
+            np = st.text_input("New password", type="password")
+            create_btn = st.form_submit_button("Create account")
+        if create_btn:
+            if nu.strip() and np.strip():
+                add_user(nu.strip(), np)
+                st.success("Account created! Please log in below.")
+            else:
+                st.error("Username and password are required.")
+
     with st.form("login"):
         username = st.text_input("Username")
         password = st.text_input("Password", type="password")

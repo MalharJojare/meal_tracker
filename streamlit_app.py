@@ -1,31 +1,50 @@
-import os
+# === DB bootstrap (drop-in) ===
+import os, shutil
 from pathlib import Path
-import shutil
+import sqlite3
 
 def on_cloud() -> bool:
-    # Allow override via Secrets: FORCE_CLOUD = "1"
-    if os.environ.get("FORCE_CLOUD", "") == "1":
-        return True
-    return os.path.isdir("/mount/data")
+    # You can also set FORCE_CLOUD="1" in Streamlit Secrets to force True
+    return os.environ.get("FORCE_CLOUD", "") == "1" or os.path.isdir("/mount/data")
 
 IS_CLOUD = on_cloud()
-DATA_DIR = Path("/mount/data") if IS_CLOUD else Path(".")
-# Only create locally; /mount/data exists on Cloud and shouldn't be mkdir'ed by the app
-if not IS_CLOUD:
+
+# Use an app-specific subfolder under /mount/data (we can mkdir this)
+if IS_CLOUD:
+    DATA_DIR = Path("/mount/data/meal_tracker")
     DATA_DIR.mkdir(parents=True, exist_ok=True)
+else:
+    DATA_DIR = Path(".")  # local
 
 DB_PATH = DATA_DIR / "meals.db"
 REMEMBER_PATH = DATA_DIR / "remember.json"
 
-# --- Safe, optional seed (won't crash if missing or unwritable) ---
+# Optional seed (only on first run; ignore errors)
 SEED_DB = Path("seed/meals.db")
 if IS_CLOUD and (not DB_PATH.exists()) and SEED_DB.exists():
     try:
-        # Parent should already exist on Cloud; if not, don't crash
         shutil.copy(str(SEED_DB), str(DB_PATH))
-    except Exception as e:
-        # Just continue: SQLite will create the DB on connect
+    except Exception:
         pass
+
+# Robust connect: try normal, then URI fallback
+def connect_sqlite(db_path: Path) -> sqlite3.Connection:
+    try:
+        return sqlite3.connect(str(db_path), check_same_thread=False, timeout=30)
+    except sqlite3.OperationalError:
+        # URI fallback w/ read-write-create
+        uri = f"file:{db_path.as_posix()}?mode=rwc"
+        return sqlite3.connect(uri, check_same_thread=False, timeout=30, uri=True)
+
+conn = connect_sqlite(DB_PATH)
+c = conn.cursor()
+
+# Journal mode: WAL may not be supported; fall back quietly
+try:
+    c.execute("PRAGMA journal_mode=WAL;")
+except sqlite3.OperationalError:
+    pass
+# === end DB bootstrap ===
 
 import streamlit as st
 import sqlite3
